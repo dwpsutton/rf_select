@@ -59,6 +59,8 @@ def conditionalPermutationImportance(X,y,clf=None):
         var= 1
         for decTree in clf.estimators_:
             tree= decTree.tree_
+            binID= getDecisionBins(X,decTree,var)
+            
 
     
     
