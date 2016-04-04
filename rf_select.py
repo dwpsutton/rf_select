@@ -18,7 +18,7 @@ class rf_select():
         self.importance_= importance
         #
         # Run
-        if self.recursive:
+        if self.recursive_:
             return self.recursiveFeatureElimination(X,y)
         else:
             return self.staticFeatureElimination(X,y)
@@ -27,9 +27,39 @@ class rf_select():
     def _recursiveFeatureElimination(X,y):
         print 'Not implemented'
         return None
+
     def _staticFeatureElimination(X,y):
-        print 'Not implemented'
-        return None
+        # TODO: this needs to be able to run on straight-up data, so importances/metric need to cross-validate.
+        #
+        clf= copy.deepcopy( self.clf_ )
+        clf.fit(X,y)
+        if self.importance_ == 'gini':
+            importances= giniImportance(X,y,clf=clf)
+        elif self.importance_ == 'permutation':
+            importances= permutationImportance(X,y,clf=clf)
+        elif self.importance_ == 'conditional':
+            importances= conditionalPermutationImportance(X,y,clf=clf)
+        else:
+            print 'Error: importance not recognised: '+str(self.importance_)
+        #
+        ordering= np.argsort( importances )
+        resultDict= {}
+        toCut= ordering[0:2]
+        for ind,i in enumerate(ordering[2:]):
+            toUse= filter(lambda x: True if x not in toCut else False,range(len(ordering)))
+            #
+            clf= copy.deepcopy( self.clf_ )
+            clf.fit(X[:,np.array(toUse),:],y)
+            #
+            if self.metic_ == 'OOB':
+                 metric= clf.oob_score 
+            elif self.metric=='AUC':
+                 print 'Not implemented'
+            else:
+                print 'Error: metric not recognised: '+str(self.metric_)
+            #
+            resultDict[ind]= ( toUse, metric )
+        return resultDict
 
 
 def giniImportance(X,y,clf=None):
