@@ -1,8 +1,9 @@
 import numpy as np
 import sys
+import copy
 
 from sklearn.cross_validation import ShuffleSplit
-from sklearn.metrics import r2_score
+from sklearn.metrics import r2_score,auric
 from collections import defaultdict
 
 
@@ -14,8 +15,15 @@ class rf_select():
         # Initialise
         self.clf_=clf
         self.recursive_= recusive
-        self.metric_= metric
-        self.importance_= importance
+        if metric in [None,'OOB','AUC']:
+            self.metric_= metric
+        else:
+            raise ValueError('Error: metric not recognised: '+str(metric))
+        if importance in ['gini','permutation','conditional']:
+            self.importance_= importance
+        else:
+            raise ValueError('Error: importance not recognised: '+str(importance))
+        self.nCV_= 5
         #
         # Run
         if self.recursive_:
@@ -24,79 +32,124 @@ class rf_select():
             return self.staticFeatureElimination(X,y)
 
 
-    def _recursiveFeatureElimination(X,y):
+    def _recursiveFeatureElimination(self,X,y):
         print 'Not implemented'
         return None
 
-    def _staticFeatureElimination(X,y):
-        # TODO: this needs to be able to run on straight-up data, so importances/metric need to cross-validate.
+    def _staticFeatureElimination(self,X,y):
         #
-        clf= copy.deepcopy( self.clf_ )
-        clf.fit(X,y)
-        if self.importance_ == 'gini':
-            importances= giniImportance(X,y,clf=clf)
-        elif self.importance_ == 'permutation':
-            importances= permutationImportance(X,y,clf=clf)
-        elif self.importance_ == 'conditional':
-            importances= conditionalPermutationImportance(X,y,clf=clf)
-        else:
-            print 'Error: importance not recognised: '+str(self.importance_)
+        # Get initial importances
+        Imp= importanceEstimator(clf=self.clf_,nCV=self.nCV_,metric=self.metric_,algorithm=self.importance_)
+        importances,_= Imp.fit(X,y)
         #
+        # Elminate features using static importance
         ordering= np.argsort( importances )
         resultDict= {}
-        toCut= ordering[0:2]
-        for ind,i in enumerate(ordering[2:]):
+        toCut= []
+        for ind,i in enumerate(ordering[:-2]):
             toUse= filter(lambda x: True if x not in toCut else False,range(len(ordering)))
             #
-            clf= copy.deepcopy( self.clf_ )
-            clf.fit(X[:,np.array(toUse),:],y)
-            #
-            if self.metic_ == 'OOB':
-                 metric= clf.oob_score 
-            elif self.metric=='AUC':
-                 print 'Not implemented'
-            else:
-                print 'Error: metric not recognised: '+str(self.metric_)
-            #
+            Imp_i = copy.deepcopy( Imp )
+            _,metric= Imp_i.fit(X,y)
             resultDict[ind]= ( toUse, metric )
+            #
+            toCut.append( i )
         return resultDict
 
 
-def giniImportance(X,y,clf=None):
-    return rf.feature_importance_
-
-def permutationImportance(X,y,clf=None):
-    scores = defaultdict(list) # Any unknown element is automatically a list
-    #
-    #crossvalidate the scores on a number of different random splits of the data
-    for train_idx, test_idx in ShuffleSplit(len(X), 100, .3):
-        X_train, X_test = X[train_idx], X[test_idx]
-        y_train, y_test = y[train_idx], y[test_idx]
-        r = rf.fit(X_train, Y_train)
-        acc = r2_score(Y_test, rf.predict(X_test))
-        for i in range(X.shape[1]):
-            X_t = X_test.copy()
-            np.random.shuffle(X_t[:, i])
-            shuff_acc = r2_score(Y_test, rf.predict(X_t))
-            scores[i].append((acc-shuff_acc)/acc)
-    for i in range(X.shape[1]):
-        importance[i]= np.mean(scores[i])
-    return importance
+class importanceEstimator():
+    '''
+        Here be documentation.
+    '''
+    def __init__(clf=None,nCV=5,metric=None,algorithm='gini'):
+        self.clf= clf
+        self.nCV= nCV
+        if metric in [None,'OOB','AUC']:
+            self.metric= metric
+        else:
+            raise ValueError('Error: metric not recognised: '+str(metric))
+        if algorithm in ['gini','permutation','conditional']:
+            self.algorithm= algorithm
+        else:
+            raise ValueError('Error: algorithm not recognised: '+str(algorithm))
 
 
-def conditionalPermutationImportance(X,y,clf=None):
-    if False:
-        var= 1
-        for decTree in clf.estimators_:
-            tree= decTree.tree_
-            binID= getDecisionBins(X,decTree,var)
+    def fit(X,y):
+        '''
+            This function actually calculates the importances and accuracy metric
+            using cross validation.
+            Usage:
+              imp,acc = fit(X,y)
+            Arguments:
+              X: feature vector, numpy array
+              y: label vector, numpy array
+            Return values:
+              imp: feature importance vector
+              acc: estimator accuracy metric
+        '''
+        scores = defaultdict(list) # Any unknown element is automatically a list
+        rf= copy.deepcopy(self.clf)
+        #
+        #crossvalidate the scores on a number of different random splits of the data
+        outAcc= 0.
+        for train_idx, test_idx in ShuffleSplit(len(X), self.nCV, .3):
+            X_train, X_test = X[train_idx], X[test_idx]
+            y_train, y_test = y[train_idx], y[test_idx]
+            r = rf.fit(X_train, Y_train)
+            # Get accuracy metric
+            if metric is None:
+                outAcc= None
+            elif metric == 'OOB':
+                outAcc += rf.oob_score
+            elif metric == 'AUC':
+                outAcc += sklearn.metrics.roc_auc_score(y_test, rf.predict_proba(X_test) )
+            if self.algorithm == 'gini':
+                scores[i].append( self.giniImportance(rf,X_test,y_test) )
+            elif self.algorithm == 'permutation':
+                scores[i].append( self.permutationImportance(rf,X_test,y_test) )
+            elif self.algorithm == 'conditional':
+                scores[i].append( self.conditionalPermutationImportance(rf,X_test,y_test) )
+        #
+        # Return mean importance and metric
+        importances= np.array([np.mean(scores[i]) for i in range(X.shape[1])])
+        return importances, outAcc / float(self.nCV)
+            
             
 
-    
-    
-    else:
-        print 'Not implemented yet'
-        return None
+    def giniImportance(self,rf,X,y):
+        return rf.feature_importance_
+
+    def permutationImportance(X,y,rf):
+        # Get feature importances
+        acc = r2_score(y, rf.predict(X))
+        scores= defaultdict(list)
+        for i in range(X.shape[1]):
+            X_t = X.copy()
+            np.random.shuffle(X_t[:, i])
+            shuff_acc = r2_score(Y, rf.predict(X_t))
+            scores[i].append((acc-shuff_acc)/acc)
+        return np.array([ np.mean(scores[i]) for i in range(X.shape[1]) ])
+
+
+    def conditionalPermutationImportance(X,y):
+        if False:
+            rf= copy.deepcopy(self.clf)
+            var= 1
+            for decTree in rf.estimators_:
+                tree= decTree.tree_
+                binID= getDecisionBins(X,decTree,var)
+        else:
+            raise ValueError('Not implemented yet')
+
+
+
+
+####################################
+#                                  #
+#  Functions not bound to a class  #
+#                                  #
+####################################
+
 
 
 def fitElbow(x,y):
