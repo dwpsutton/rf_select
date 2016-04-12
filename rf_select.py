@@ -33,8 +33,25 @@ class rf_select():
 
 
     def _recursiveFeatureElimination(self,X,y):
-        print 'Not implemented'
-        return None
+        #
+        # Elminate features using updated importance
+        resultDict= {}
+        toCut= [] #start with all features
+        ctr= 0
+        #
+        # Keeps minimum of 3 most important features
+        while ctr < np.shape(X)[1] - 3:
+            toUse= filter(lambda x: True if x not in toCut else False,range(np.shape(X)[1]))
+            #
+            # Re-evaluate importances and metric using allowed features
+            Imp_i= importanceEstimator(clf=self.clf_,nCV=self.nCV_,metric=self.metric_,algorithm=self.importance_)
+            importances_i, metric_i= Imp_i.fit( X[:,toUse] , y )
+            resultDict[ctr]= ( toUse, metric_i )
+            #
+            # cut lowest importance feature next time
+            toCut.append( np.argsort( importances_i )[0] ) 
+            ctr+=1
+        return resultDict
 
     def _staticFeatureElimination(self,X,y):
         #
