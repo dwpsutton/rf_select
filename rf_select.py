@@ -143,20 +143,29 @@ class importanceEstimator():
         for i in range(X.shape[1]):
             X_t = X.copy()
             np.random.shuffle(X_t[:, i])
-            shuff_acc = r2_score(Y, rf.predict(X_t))
+            shuff_acc = r2_score(y, rf.predict(X_t))
             scores[i].append((acc-shuff_acc)/acc)
         return np.array([ np.mean(scores[i]) for i in range(X.shape[1]) ])
 
 
     def conditionalPermutationImportance(X,y):
-        if False:
-            rf= copy.deepcopy(self.clf)
-            var= 1
+        # conditional importance
+        scores= defaultdict(list)
+        acc = r2_score(y, rf.predict(X))
+        rf= copy.deepcopy(self.clf)
+        for var in np.shape(X)[0]:
             for decTree in rf.estimators_:
                 tree= decTree.tree_
-                binID= getDecisionBins(X,decTree,var)
-        else:
-            raise ValueError('Not implemented yet')
+                binID, binMembers= getDecisionBins(X,decTree,var)
+                #
+                iShuff= np.zeros(np.shape(X)[0])
+                for iObs in range(np.shape(X)[0]):
+                    iShuff[iObs]= np.random.choice( binMembers[binID[iObs]] )
+                X_t = X.copy()[iShuff,:]
+                shuff_acc = r2_score(y, rf.predict(X_t))
+                scores[var].append((acc-shuff_acc)/acc)
+        return np.array( [np.mean(scores[i]) for i in range(X.shape[1]) ] )
+
 
 
 
@@ -196,22 +205,27 @@ def fitElbow(x,y):
 
 def getDecisionBins(X,decTree,idx_ignore):
     '''
-        return decision bins for each observation
+        return decision bins for each observation, and binMembers 
+        dict for each populated bin
     '''
     # Get the number of splits to safely consider
     K= np.log2(0.368 * n_nodes/2)
-    ind= getFirstKSplits(decTree.tree_,K)
+    indList= getFirstKSplits(decTree.tree_,K)
+    ind= {}
+    for i in indList:
+        ind[i]= 1
     #
     # propagate each sample through tree to get bin
     node_indicator = decTree.decision_path(X_test) # Only in 0.18 !!
     #
     decisionBin= np.zeros( np.shape(X)[0])
+    binMembers= {}
     for i in range(np.shape(X)[0]):
         js= np.where( node_indicator[i,:] > 0)[0] #The nodes this sample passes through
         binIDSum= 0
         for j in js:
             # is node in our first K splits?
-            indicatorFunction= j in ind #Might be inefficient as searching a list
+            indicatorFunction= j in ind #O(1) as searching keys of a dict
             #
             # is decision made on our test feature?
             indicatorFunction= indicatorFunction and (not decTree.tree_.feature[j] == idx_ignore)
@@ -224,7 +238,11 @@ def getDecisionBins(X,decTree,idx_ignore):
                 ii= np.where( ind == j )[0]
                 binIDSum += 2**(ii-1)
         decisionBin[i]= binIDSum
-    return decisionBin
+        if binIDSum in binMembers:
+            binMembers[binIDSum].append( i )
+        else:
+            binMembers[binIDSum]= [i]
+    return decisionBin, binMembers
 
 def getFirstKSplits(tree,K):
     '''
