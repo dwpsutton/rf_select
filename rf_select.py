@@ -148,22 +148,24 @@ class importanceEstimator():
         return np.array([ np.mean(scores[i]) for i in range(X.shape[1]) ])
 
 
-    def conditionalPermutationImportance(X,y):
+    def conditionalPermutationImportance(X,y,rf):
         # conditional importance
         scores= defaultdict(list)
         acc = r2_score(y, rf.predict(X))
-        rf= copy.deepcopy(self.clf)
-        for var in np.shape(X)[0]:
+        for var in np.shape(X)[1]:
+            yPredicted= np.zeros( np.shape(X)[0], len(rf.estimators_) )
+            iTree= 0
             for decTree in rf.estimators_:
-                tree= decTree.tree_
                 binID, binMembers= getDecisionBins(X,decTree,var)
                 #
                 iShuff= np.zeros(np.shape(X)[0])
                 for iObs in range(np.shape(X)[0]):
                     iShuff[iObs]= np.random.choice( binMembers[binID[iObs]] )
                 X_t = X.copy()[iShuff,:]
-                shuff_acc = r2_score(y, rf.predict(X_t))
-                scores[var].append((acc-shuff_acc)/acc)
+                yPredicted[:,iTree] = decTree.predict(X_t) 
+                iTree += 1
+            shuff_acc = r2_score(y, np.round(np.mean( yPredicted, axis=1)) )
+            scores[var].append((acc-shuff_acc)/acc)
         return np.array( [np.mean(scores[i]) for i in range(X.shape[1]) ] )
 
 
